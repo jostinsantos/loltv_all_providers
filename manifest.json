@@ -1,29 +1,16 @@
 {
-  "id": "community.loltv.fuentes",
+  "id": "loltv.allproviders",
+  "name": "LOLTV All Providers",
   "version": "1.0.0",
-  "name": "LOLTV Fuentes (Embed69 + Cuevana)",
-  "description": "Complemento multi-fuente: Embed69 y Cuevana con idiomas legibles (Latino/Castellano/Subtitulado). Un solo instalable, varias fuentes.",
-  "logo": "https://via.placeholder.com/128/0B0F14/64B5F6?text=LF",
+  "description": "Complemento multi-fuente para el modal de servidores. Fuentes: Embed69, Cuevana, Unlimplay, Cinecalidad, CineSrc, FuegoCine, HackStore, Pelispedia, PelisPlus, Poseidon, SeriesMetro, SmartPelis, TioPlus, VidSrc.",
+  "author": "LOLTV",
+  "logo": "",
   "resources": ["stream"],
-  "types": ["movie", "series", "tv"],
-  "idPrefixes": ["tmdb", "tt"],
-  "catalogs": [],
-  "behaviorHints": {
-    "adult": false,
-    "p2p": false
-  },
-  "sources": [
-    {
-      "id": "embed69",
-      "name": "Embed69",
-      "types": ["movie", "series"],
-      "entry": "getStreamsEmbed69"
-    },
-    {
-      "id": "cuevana",
-      "name": "Cuevana",
-      "types": ["movie", "series"],
-      "entry": "getStreamsCuevana"
-    }
-  ]
+  "types": ["movie", "series"],
+  "idPrefixes": ["tmdb"],
+  "entry": "index.js",
+  "exports": ["getStreams", "extract", "listSources"],
+  "supportedTypes": ["movie", "series"],
+  "contentLanguage": ["es", "en"],
+  "formats": ["hls", "mp4"]
 }
