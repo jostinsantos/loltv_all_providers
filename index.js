@@ -1,18 +1,20 @@
 /**
- * LOLTV All Providers — addon compatible con LOL App (modal de servidores)
- * Fuentes: Embed69, Cuevana, Unlimplay, Cinecalidad, CineSrc, FuegoCine,
- *          HackStore, Pelispedia, PelisPlus, Poseidon, SeriesMetro,
- *          SmartPelis, TioPlus, VidSrc
+ * LOLTV All Providers v1.1 — un solo addon con todas las fuentes
+ * Fuentes (lógica alineada a extractores originales Dart):
+ *   Embed69, Cuevana, Unlimplay, Cinecalidad, CineSrc, FuegoCine,
+ *   HackStore, Pelispedia, PelisPlus, Poseidon, SeriesMetro,
+ *   SmartPelis, TioPlus, VidSrc
  *
- * Contrato app:
- *   getStreams(tmdbId, type, season, episode) → Array<{url,title,quality,provider,lang,headers}>
+ * Contrato LOL App:
+ *   getStreams(tmdbId, type, season, episode) → Array<Stream>
  *   extract(embedUrl) → {url, quality, headers} | null
  *
- * Instalación: URL de este index.js o del manifest.json, o repo GitHub user/repo
+ * title / servidor_nombre:
+ *   "{Idioma} · {Servidor} · {HLS|MP4|Embed} · {Calidad}"
  */
 var TMDB_KEY = 'a2d9bbed370d9f678e34006f8750a5a5';
 var TMDB = 'https://api.themoviedb.org/3';
-var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+var UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 var DEBUG = false;
 
 function dbg() {
@@ -20,10 +22,10 @@ function dbg() {
   try { console.log.apply(console, ['[LOLTV]'].concat([].slice.call(arguments))); } catch (e) {}
 }
 
-// ─── HTTP ────────────────────────────────────────────────
+/* ── HTTP ─────────────────────────────────────────────── */
 function fetchT(url, opts, ms) {
   opts = opts || {};
-  ms = ms || 10000;
+  ms = ms || 12000;
   if (typeof AbortController === 'undefined') return fetch(url, opts);
   var ctrl = new AbortController();
   var timer = setTimeout(function () { try { ctrl.abort(); } catch (e) {} }, ms);
@@ -54,7 +56,7 @@ async function httpGetJson(url, headers) {
   } catch (e) { return null; }
 }
 
-// ─── URL helpers (Hermes / QuickJS safe) ─────────────────
+/* ── URL helpers ──────────────────────────────────────── */
 function originOf(url) {
   var m = /^(https?:\/\/[^\/?#]+)/i.exec(String(url || ''));
   return m ? m[1] : '';
@@ -85,21 +87,26 @@ function slugify(title) {
   return s.replace(/^-+|-+$/g, '');
 }
 
-// ─── Language (legible + códigos para el modal) ──────────
-function normalizeLanguage(language) {
+/* ── Idioma ───────────────────────────────────────────── */
+function langLabel(language) {
   var lang = String(language || '').toLowerCase().trim();
   if (!lang) return 'Latino';
-  if (lang === 'es_es' || lang === 'es-es' || lang.indexOf('castellano') >= 0 || lang.indexOf('españa') >= 0 || lang === 'spanish' || lang === 'esp' || lang === 'es' || (lang.indexOf('espa') >= 0 && lang.indexOf('latino') < 0))
+  if (lang === 'es_es' || lang === 'es-es' || lang.indexOf('castellano') >= 0 ||
+      lang.indexOf('españa') >= 0 || lang === 'spanish' || lang === 'esp' ||
+      (lang.indexOf('espa') >= 0 && lang.indexOf('latino') < 0 && lang.indexOf('mx') < 0))
     return 'Castellano';
   if (lang.indexOf('sub') >= 0 || lang.indexOf('vose') >= 0 || lang.indexOf('subtit') >= 0)
     return 'Subtitulado';
-  if (lang.indexOf('ingl') >= 0 || lang.indexOf('english') >= 0 || lang === 'en' || lang === 'en_us' || lang === 'en-us')
+  if (lang.indexOf('ingl') >= 0 || lang.indexOf('english') >= 0 || lang === 'en' ||
+      lang === 'en_us' || lang === 'en-us')
     return 'Inglés';
   if (lang.indexOf('japon') >= 0 || lang.indexOf('ja_') >= 0) return 'Japonés';
+  if (lang === 'es_mx' || lang === 'es-mx' || lang.indexOf('latino') >= 0 || lang === 'lat' || lang === 'mx')
+    return 'Latino';
   return 'Latino';
 }
 function langCode(language) {
-  var n = normalizeLanguage(language);
+  var n = langLabel(language);
   if (n === 'Castellano') return 'es_ES';
   if (n === 'Inglés') return 'en_US';
   if (n === 'Japonés') return 'ja_JA';
@@ -107,7 +114,7 @@ function langCode(language) {
   return 'es_MX';
 }
 
-// ─── Host map + detect server ────────────────────────────
+/* ── Host / servidor ──────────────────────────────────── */
 var HOST_MAP = {
   streamwish: 'vibuxer.com', hglink: 'vibuxer.com', awish: 'vibuxer.com',
   strwish: 'vibuxer.com', wishfast: 'vibuxer.com', embedwish: 'vibuxer.com',
@@ -128,11 +135,29 @@ function mapDomain(url) {
 }
 function detectServer(url) {
   var s = hostOf(url);
-  if (s.indexOf('voe') >= 0 || s.indexOf('cloudwindow') >= 0 || s.indexOf('marissashare') >= 0) return 'voe';
-  if (s.indexOf('streamwish') >= 0 || s.indexOf('hlswish') >= 0 || s.indexOf('hglink') >= 0 || s.indexOf('vibuxer') >= 0 || s.indexOf('awish') >= 0 || s.indexOf('strwish') >= 0 || s.indexOf('wishfast') >= 0 || s.indexOf('embedwish') >= 0 || s.indexOf('wishembed') >= 0) return 'streamwish';
-  if (s.indexOf('vidhide') >= 0 || s.indexOf('filelions') >= 0 || s.indexOf('minochinos') >= 0 || s.indexOf('callistanise') >= 0 || s.indexOf('vadisov') >= 0) return 'vidhide';
+  if (s.indexOf('voe') >= 0 || s.indexOf('cloudwindow') >= 0 || s.indexOf('marissashare') >= 0) return 'Voe';
+  if (s.indexOf('streamwish') >= 0 || s.indexOf('hlswish') >= 0 || s.indexOf('hglink') >= 0 ||
+      s.indexOf('vibuxer') >= 0 || s.indexOf('awish') >= 0 || s.indexOf('strwish') >= 0 ||
+      s.indexOf('wishfast') >= 0 || s.indexOf('embedwish') >= 0 || s.indexOf('wishembed') >= 0) return 'StreamWish';
+  if (s.indexOf('vidhide') >= 0 || s.indexOf('filelions') >= 0 || s.indexOf('minochinos') >= 0 ||
+      s.indexOf('callistanise') >= 0 || s.indexOf('vadisov') >= 0) return 'VidHide';
+  if (s.indexOf('filemoon') >= 0 || s.indexOf('moonembed') >= 0) return 'FileMoon';
+  if (s.indexOf('dood') >= 0 || s.indexOf('ds2play') >= 0) return 'DoodStream';
+  if (s.indexOf('fastream') >= 0) return 'Fastream';
+  if (s.indexOf('streamtape') >= 0 || s.indexOf('strtape') >= 0) return 'StreamTape';
+  if (s.indexOf('vidsrc') >= 0) return 'VidSrc';
+  if (s.indexOf('mixdrop') >= 0) return 'MixDrop';
+  if (s.indexOf('upstream') >= 0) return 'Upstream';
+  return 'Servidor';
+}
+function serverKey(url) {
+  var s = hostOf(url);
+  if (s.indexOf('voe') >= 0 || s.indexOf('cloudwindow') >= 0) return 'voe';
+  if (s.indexOf('streamwish') >= 0 || s.indexOf('hlswish') >= 0 || s.indexOf('hglink') >= 0 ||
+      s.indexOf('vibuxer') >= 0 || s.indexOf('awish') >= 0 || s.indexOf('strwish') >= 0 ||
+      s.indexOf('wishfast') >= 0 || s.indexOf('embedwish') >= 0) return 'streamwish';
+  if (s.indexOf('vidhide') >= 0 || s.indexOf('filelions') >= 0 || s.indexOf('callistanise') >= 0) return 'vidhide';
   if (s.indexOf('filemoon') >= 0 || s.indexOf('moonembed') >= 0) return 'filemoon';
-  if (s.indexOf('dood') >= 0 || s.indexOf('ds2play') >= 0) return 'doodstream';
   if (s.indexOf('fastream') >= 0) return 'fastream';
   return 'unknown';
 }
@@ -141,11 +166,11 @@ function embedCandidates(url) {
   if (s.indexOf('//') === 0) s = 'https:' + s;
   var mapped = mapDomain(s);
   var list = [mapped, s];
-  if (detectServer(mapped) === 'streamwish') list.push(withHost(s, 'hlswish.com'));
+  if (serverKey(mapped) === 'streamwish') list.push(withHost(s, 'hlswish.com'));
   return list.filter(function (v, i, a) { return v && a.indexOf(v) === i; });
 }
 
-// ─── Packer / HLS extract ────────────────────────────────
+/* ── Packer / HLS ─────────────────────────────────────── */
 var PACKER_ARGS = /\}\s*\(\s*(['"])((?:\\[\s\S]|(?!\1)[^\\])*)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])((?:\\[\s\S]|(?!\5)[^\\])*)\5\s*\.split\(\s*(['"])\|\7\s*\)/g;
 function unpackOne(p, a, k) {
   p = p.replace(/\\(['"\\])/g, '$1');
@@ -218,22 +243,28 @@ function findStream(html, origin) {
 }
 function isStreamUrl(u) {
   u = String(u || '').toLowerCase();
-  return u.indexOf('.m3u8') >= 0 || u.indexOf('.mp4') >= 0 || u.indexOf('/hls/') >= 0 || u.indexOf('/stream/') >= 0 || u.indexOf('playlist') >= 0;
+  return u.indexOf('.m3u8') >= 0 || u.indexOf('.mp4') >= 0 ||
+    u.indexOf('/hls/') >= 0 || u.indexOf('/stream/') >= 0 || u.indexOf('playlist') >= 0;
+}
+function streamKind(url) {
+  var u = String(url || '').toLowerCase();
+  if (u.indexOf('.m3u8') >= 0 || u.indexOf('/hls/') >= 0 || u.indexOf('playlist') >= 0) return 'HLS';
+  if (u.indexOf('.mp4') >= 0 || u.indexOf('.mkv') >= 0) return 'MP4';
+  return 'Embed';
 }
 function detectQualityFromUrl(url) {
-  if (!url) return 'Unknown';
-  var p = url.match(/[_\-\/](\d{3,4})p/i);
-  return p ? p[1] + 'p' : 'Unknown';
+  if (!url) return 'HD';
+  var p = String(url).match(/[_\-\/](\d{3,4})p/i);
+  return p ? p[1] + 'p' : 'HD';
 }
 function b64decode(s) {
   try {
     if (typeof atob !== 'undefined') return atob(s);
-    if (typeof Buffer !== 'undefined') return Buffer.from(s, 'base64').toString('utf8');
   } catch (e) {}
   return null;
 }
 
-// ─── Resolvers ───────────────────────────────────────────
+/* ── Resolvers ────────────────────────────────────────── */
 async function resolvePacked(url) {
   var origin = originOf(url);
   var html = await httpGet(url, { Referer: origin + '/' });
@@ -242,7 +273,7 @@ async function resolvePacked(url) {
   if (!s) return null;
   return {
     url: s,
-    quality: detectQualityFromUrl(s) !== 'Unknown' ? detectQualityFromUrl(s) : 'HD',
+    quality: detectQualityFromUrl(s),
     headers: { 'User-Agent': UA, Referer: origin + '/', Origin: origin }
   };
 }
@@ -328,15 +359,15 @@ async function resolveGeneric(url, depth) {
   return null;
 }
 async function extractOne(url, depth) {
-  var server = detectServer(url);
+  var key = serverKey(url);
   var result = null;
   try {
-    if (server === 'voe') result = await resolveVoe(url);
-    else if (server === 'streamwish' || server === 'vidhide' || server === 'filemoon' || server === 'fastream')
+    if (key === 'voe') result = await resolveVoe(url);
+    else if (key === 'streamwish' || key === 'vidhide' || key === 'filemoon' || key === 'fastream')
       result = await resolvePacked(url);
     else result = await resolveGeneric(url, depth);
   } catch (e) { result = null; }
-  if ((!result || !result.url) && server !== 'unknown') {
+  if ((!result || !result.url) && key !== 'unknown') {
     try { result = await resolveGeneric(url, depth); } catch (e) {}
   }
   return result;
@@ -350,12 +381,16 @@ async function extract(embedUrl, depth) {
     if (r && r.url && r.url !== candidates[i] && isStreamUrl(r.url)) return r;
   }
   if (isStreamUrl(embedUrl)) {
-    return { url: embedUrl, quality: detectQualityFromUrl(embedUrl), headers: { 'User-Agent': UA, Referer: originOf(embedUrl) + '/' } };
+    return {
+      url: embedUrl,
+      quality: detectQualityFromUrl(embedUrl),
+      headers: { 'User-Agent': UA, Referer: originOf(embedUrl) + '/' }
+    };
   }
   return null;
 }
 
-// ─── TMDB helpers ────────────────────────────────────────
+/* ── TMDB ─────────────────────────────────────────────── */
 async function getTmdbInfo(tmdbId, isMovie) {
   var endpoint = isMovie ? 'movie' : 'tv';
   async function fetchLang(lang) {
@@ -395,34 +430,73 @@ function extractNextData(html) {
   } catch (e) { return null; }
 }
 
-// ─── Tag stream para el modal de la app ──────────────────
+/**
+ * Formato de título para el modal:
+ *   "Latino · Voe · HLS · 1080p"
+ * Campos que usa la app (StreamItem + AddonSourceAdapter):
+ *   url, title, name, quality, provider, lang, headers
+ */
 function tagStream(extracted, langRaw, serverName, sourceId, sourceName) {
   if (!extracted || !extracted.url) return null;
-  var lang = normalizeLanguage(langRaw);
-  var code = langCode(lang);
-  var provider = serverName || detectServer(extracted.url);
-  if (provider === 'unknown') provider = 'Servidor';
-  provider = provider.charAt(0).toUpperCase() + provider.slice(1);
-  var q = extracted.quality && extracted.quality !== 'Unknown' ? extracted.quality : 'HD';
-  // Formato que JsAddonRuntime._parseResult + AddonSourceAdapter esperan
+  var label = langLabel(langRaw);
+  var code = langCode(langRaw);
+  var provider = (serverName && String(serverName).trim()) || detectServer(extracted.url);
+  provider = String(provider);
+  if (provider.length) provider = provider.charAt(0).toUpperCase() + provider.slice(1);
+  var q = extracted.quality && extracted.quality !== 'Unknown' ? extracted.quality : detectQualityFromUrl(extracted.url);
+  if (!q || q === 'Unknown') q = 'HD';
+  var kind = streamKind(extracted.url);
+  var title = label + ' · ' + provider + ' · ' + kind + ' · ' + q;
+  var headers = extracted.headers || {
+    'User-Agent': UA,
+    Referer: originOf(extracted.url) + '/'
+  };
   return {
     url: extracted.url,
-    title: lang + ' - ' + provider,
-    name: sourceName + ' - ' + q,
+    title: title,
+    name: title,
     quality: q,
-    provider: provider,
-    language: lang,
+    provider: sourceName + ' · ' + provider,
+    language: label,
     lang: code,
-    audio: lang,
-    headers: extracted.headers || { 'User-Agent': UA, Referer: originOf(extracted.url) + '/' },
+    audio: label,
+    headers: headers,
     source: sourceId,
-    sourceName: sourceName
+    sourceName: sourceName,
+    isHls: kind === 'HLS'
   };
 }
 
-// ═══════════════════════════════════════════════════════════
-// PROVIDERS
-// ═══════════════════════════════════════════════════════════
+/* Si no se pudo resolver HLS, igual devolvemos el embed con kind Embed */
+function tagEmbed(url, langRaw, serverName, sourceId, sourceName, quality) {
+  if (!url) return null;
+  var label = langLabel(langRaw);
+  var code = langCode(langRaw);
+  var provider = (serverName && String(serverName).trim()) || detectServer(url);
+  provider = String(provider);
+  if (provider.length) provider = provider.charAt(0).toUpperCase() + provider.slice(1);
+  var q = quality || 'HD';
+  var kind = streamKind(url);
+  var title = label + ' · ' + provider + ' · ' + kind + ' · ' + q;
+  return {
+    url: url,
+    title: title,
+    name: title,
+    quality: q,
+    provider: sourceName + ' · ' + provider,
+    language: label,
+    lang: code,
+    audio: label,
+    headers: { 'User-Agent': UA, Referer: originOf(url) + '/' },
+    source: sourceId,
+    sourceName: sourceName,
+    isHls: kind === 'HLS'
+  };
+}
+
+/* ═══════════════════════════════════════════════════════
+   PROVIDERS — lógica de los extractores originales
+   ═══════════════════════════════════════════════════════ */
 
 async function providerEmbed69(tmdbId, isMovie, season, episode) {
   var imdb = await getImdbId(tmdbId, isMovie);
@@ -431,36 +505,73 @@ async function providerEmbed69(tmdbId, isMovie, season, episode) {
   if (isMovie) variants.push(imdb);
   else {
     var e2 = String(episode).padStart(2, '0');
-    variants.push(imdb + '-' + season + 'x' + e2, imdb + '-' + season + 'x' + episode);
+    var s2 = String(season).padStart(2, '0');
+    variants.push(
+      imdb + '-' + season + 'x' + e2,
+      imdb + '-' + season + 'x' + episode,
+      imdb + '-' + s2 + 'x' + e2,
+      imdb + '-' + season + '-' + e2,
+      imdb + '-' + season + '-' + episode
+    );
   }
-  var bases = ['https://embed69.org/f/', 'https://serieskao.top/vidurl/', 'https://xupalace.org/video/'];
+  var bases = [
+    { base: 'https://embed69.org/f/', slash: false, ref: 'https://sololatino.net/' },
+    { base: 'https://serieskao.top/vidurl/', slash: true, ref: 'https://serieskao.top/' },
+    { base: 'https://xupalace.org/video/', slash: true, ref: 'https://xupalace.org/' }
+  ];
   var embeds = [];
   for (var b = 0; b < bases.length && embeds.length === 0; b++) {
     for (var v = 0; v < variants.length && embeds.length === 0; v++) {
-      var pageUrl = bases[b] + variants[v] + (bases[b].indexOf('embed69') >= 0 ? '' : '/');
-      var html = await httpGet(pageUrl, { Referer: 'https://sololatino.net/' });
+      var pageUrl = bases[b].base + variants[v] + (bases[b].slash ? '/' : '');
+      var html = await httpGet(pageUrl, { Referer: bases[b].ref });
       if (!html) continue;
+
+      /* dataLink JSON (embed69 / serieskao) */
       var match = html.match(/let\s+dataLink\s*=\s*((\[[\s\S]*?\])|(\{[\s\S]*?\}))\s*;/);
-      if (!match) continue;
-      try {
-        var rawData = JSON.parse(match[1].replace(/\\\//g, '/'));
-        var data = Array.isArray(rawData) ? rawData : Object.values(rawData);
-        var langMap = { LAT: 'Latino', ESP: 'Castellano', SUB: 'Subtitulado' };
-        data.forEach(function (item) {
-          var vLang = String(item.video_language || '').toUpperCase();
-          if (vLang !== 'LAT' && vLang !== 'ESP' && vLang !== 'SUB') return;
-          var currentLang = langMap[vLang] || 'Latino';
-          var list = item.sortedEmbeds || item.embeds || [];
-          if (!Array.isArray(list)) return;
-          list.forEach(function (embed) {
-            var link = embed.link || embed.url || '';
-            if (!link || !/^https?:\/\//i.test(link)) return;
-            var sName = (embed.servername || embed.server || '').toLowerCase();
-            if (sName.indexOf('download') >= 0 || sName.indexOf('descarga') >= 0) return;
-            embeds.push({ url: link, lang: currentLang, server: embed.servername || embed.server || 'Servidor' });
+      if (match) {
+        try {
+          var rawData = JSON.parse(match[1].replace(/\\\//g, '/'));
+          var data = Array.isArray(rawData) ? rawData : Object.values(rawData);
+          var langMap = { LAT: 'Latino', ESP: 'Castellano', SUB: 'Subtitulado', LATINO: 'Latino' };
+          data.forEach(function (item) {
+            var vLang = String(item.video_language || '').toUpperCase();
+            var currentLang = langMap[vLang] || langLabel(vLang);
+            var list = item.sortedEmbeds || item.embeds || [];
+            if (!Array.isArray(list)) return;
+            list.forEach(function (embed) {
+              var link = (embed.link || embed.url || '').toString();
+              if (!link) return;
+              /* SeriesKao cifra AES; si no empieza por http, se omite */
+              if (!/^https?:\/\//i.test(link)) return;
+              var sName = (embed.servername || embed.server || '').toLowerCase();
+              if (sName.indexOf('download') >= 0 || sName.indexOf('descarga') >= 0) return;
+              if (sName === 'voe' || sName === 'rapidvideo') return;
+              link = link.replace(/hglink\.to/g, 'vibuxer.com').replace(/filelions\.to/g, 'callistanise.com');
+              embeds.push({ url: link, lang: currentLang, server: embed.servername || embed.server || 'Servidor' });
+            });
           });
-        });
-      } catch (e) {}
+        } catch (e) {}
+      }
+
+      /* Xupalace: li data-url / go_to_playerVast */
+      if (!embeds.length) {
+        var reLi = /<li[^>]*>([\s\S]*?)<\/li>/gi, mLi;
+        while ((mLi = reLi.exec(html)) !== null) {
+          var block = mLi[1];
+          var urlM = /data-url=["']([^"']+)["']/i.exec(block) || /go_to_playerVast\(["']([^"']+)["']/i.exec(block);
+          if (!urlM) continue;
+          var u = urlM[1];
+          if (!/^https?:\/\//i.test(u)) continue;
+          var langM = /data-lang=["']([^"']+)["']/i.exec(block);
+          var nameM = /data-name=["']([^"']+)["']/i.exec(block) || />([A-Za-z0-9 ._:-]{2,30})</.exec(block);
+          u = u.replace(/hglink\.to/g, 'vibuxer.com').replace(/filelions\.to/g, 'callistanise.com');
+          embeds.push({
+            url: u,
+            lang: langM ? langLabel(langM[1]) : 'Latino',
+            server: nameM ? nameM[1] : detectServer(u)
+          });
+        }
+      }
     }
   }
   return embeds;
@@ -534,7 +645,11 @@ async function providerUnlimplay(tmdbId, isMovie, season, episode) {
   var html = await httpGet(url);
   if (!html) return [];
   var embeds = [];
-  var jsonMatch = html.match(/servers\s*[:=]\s*(\{[\s\S]*?\})\s*[;<]/) || html.match(/window\.__DATA__\s*=\s*(\{[\s\S]*?\});/);
+  var allowed = ['voe', 'streamwish', 'vidhide', 'filemoon', 'dood', 'mixdrop', 'upstream', 'filelions', 'hglink'];
+  var jsonMatch = html.match(/servers\s*[:=]\s*(\{[\s\S]*?\})\s*[;<]/) ||
+    html.match(/window\.__DATA__\s*=\s*(\{[\s\S]*?\});/) ||
+    html.match(/EMBEDS\s*=\s*(\{[\s\S]*?\});/) ||
+    html.match(/finalizePlayer\s*\(\s*(\{[\s\S]*?\})\s*\)/);
   if (jsonMatch) {
     try {
       var data = JSON.parse(jsonMatch[1]);
@@ -543,9 +658,15 @@ async function providerUnlimplay(tmdbId, isMovie, season, episode) {
         if (!servers || typeof servers !== 'object') return;
         Object.keys(servers).forEach(function (name) {
           var u = servers[name];
-          if (typeof u === 'string' && /^https?:/i.test(u)) {
-            embeds.push({ url: u, lang: normalizeLanguage(lang), server: name });
-          }
+          if (typeof u !== 'string' || !/^https?:/i.test(u)) return;
+          var base = String(name).toLowerCase().trim();
+          var ok = allowed.some(function (p) { return base.indexOf(p) === 0 || base.indexOf(p) >= 0; });
+          if (!ok && allowed.indexOf(serverKey(u)) < 0) return;
+          embeds.push({
+            url: u.replace(/hglink\.to/g, 'vibuxer.com'),
+            lang: langLabel(lang),
+            server: name
+          });
         });
       });
     } catch (e) {}
@@ -565,8 +686,9 @@ async function providerFuegoCine(tmdbId, isMovie, season, episode) {
   return data.streams.map(function (s) {
     return {
       url: (s.servidor_url || '').toString(),
-      lang: normalizeLanguage(s.idioma),
-      server: (s.servidor_nombre || 'Modlyo').toString()
+      lang: langLabel(s.idioma),
+      server: (s.servidor_nombre || 'Modlyo').toString(),
+      quality: (s.calidad || 'HD').toString()
     };
   }).filter(function (x) { return x.url; });
 }
@@ -575,18 +697,23 @@ async function providerCineSrc(tmdbId, isMovie, season, episode) {
   var embeds = [];
   var targets = isMovie
     ? [
-        'https://cinesrc.st/embed/movie/' + tmdbId,
+        'https://cinesrc.st/embed/movie/' + tmdbId + '?color=%2300ff66&autoplay=true',
         'https://videoapp.mov/e/movie/' + tmdbId,
         'https://vidsrc.sh/embed/movie?tmdb=' + tmdbId + '&ds_lang=es'
       ]
     : [
-        'https://cinesrc.st/embed/tv/' + tmdbId + '?s=' + season + '&e=' + episode,
+        'https://cinesrc.st/embed/tv/' + tmdbId + '?s=' + season + '&e=' + episode + '&color=%2300ff66',
         'https://videoapp.mov/e/tv/' + tmdbId + '/' + season + '/' + episode,
         'https://vidsrc.sh/embed/tv/' + tmdbId + '/' + season + '/' + episode + '&ds_lang=es'
       ];
-  targets.forEach(function (t) {
-    embeds.push({ url: 'https://modlyo.com/embed.php?url=' + encodeURIComponent(t), lang: 'Latino', server: 'CineSrc' });
-    embeds.push({ url: t, lang: 'Latino', server: 'CineSrc' });
+  targets.forEach(function (t, i) {
+    var names = ['CineSrc', 'VideoApp', 'VidSrc'];
+    embeds.push({ url: t, lang: 'Latino', server: names[i] || 'CineSrc' });
+    embeds.push({
+      url: 'https://modlyo.com/embed.php?url=' + encodeURIComponent(t),
+      lang: 'Latino',
+      server: (names[i] || 'CineSrc') + ' · Proxy'
+    });
   });
   return embeds;
 }
@@ -600,10 +727,80 @@ async function providerVidSrc(tmdbId, isMovie, season, episode) {
         'https://vidsrc.to/embed/tv/' + tmdbId + '/' + season + '-' + episode,
         'https://vidsrc.xyz/embed/tv/' + tmdbId + '/' + season + '-' + episode
       ];
-  urls.forEach(function (u) {
-    embeds.push({ url: u, lang: 'Inglés', server: 'VidSrc' });
-  });
+  for (var i = 0; i < urls.length; i++) {
+    var html = await httpGet(urls[i], { Referer: 'https://vidsrc.me/' });
+    if (!html) {
+      embeds.push({ url: urls[i], lang: 'Inglés', server: 'VidSrc' });
+      continue;
+    }
+    var found = false;
+    var reHash = /data-hash=["']([^"']+)["'][^>]*>([^<]*)</gi, mh;
+    while ((mh = reHash.exec(html)) !== null) {
+      found = true;
+      embeds.push({
+        url: 'https://vidsrc.me/rcp/' + mh[1],
+        lang: 'Inglés',
+        server: (mh[2] || 'VidSrc').trim() || 'VidSrc'
+      });
+    }
+    var reIfr = /<iframe[^>]+src=["']([^"']+)["']/gi, mi;
+    while ((mi = reIfr.exec(html)) !== null) {
+      found = true;
+      embeds.push({ url: mi[1], lang: 'Inglés', server: 'VidSrc Embed' });
+    }
+    if (!found) embeds.push({ url: urls[i], lang: 'Inglés', server: 'VidSrc' });
+    if (embeds.length) break;
+  }
   return embeds;
+}
+
+function _extractDataUrlLi(html) {
+  var out = [], seen = {};
+  var re = /<li[^>]*data-url=["']([^"']+)["'][^>]*data-name=["']([^"']*)["'][^>]*>/gi, m;
+  while ((m = re.exec(html)) !== null) {
+    if (seen[m[1]]) continue;
+    seen[m[1]] = true;
+    out.push({ url: m[1], lang: _detectLangFromText(m[2] + ' ' + html), server: m[2] || 'Servidor' });
+  }
+  var re2 = /<li[^>]*data-name=["']([^"']*)["'][^>]*data-url=["']([^"']+)["'][^>]*>/gi;
+  while ((m = re2.exec(html)) !== null) {
+    if (seen[m[2]]) continue;
+    seen[m[2]] = true;
+    out.push({ url: m[2], lang: _detectLangFromText(m[1] + ' ' + html), server: m[1] || 'Servidor' });
+  }
+  var opt = /var\s+options\s*=\s*(\{[\s\S]*?\});/i.exec(html);
+  if (opt) {
+    try {
+      var s = opt[1].replace(/'/g, '"').replace(/,\s*}/g, '}');
+      var data = JSON.parse(s);
+      Object.keys(data).forEach(function (key) {
+        var list = data[key];
+        if (!Array.isArray(list)) return;
+        list.forEach(function (item) {
+          if (item && item.url && !seen[item.url]) {
+            seen[item.url] = true;
+            out.push({ url: item.url, lang: langLabel(key), server: item.name || key });
+          }
+        });
+      });
+    } catch (e) {}
+  }
+  var ifr = /<iframe[^>]+src=["']([^"']+)["']/gi;
+  while ((m = ifr.exec(html)) !== null) {
+    if (!seen[m[1]]) {
+      seen[m[1]] = true;
+      out.push({ url: m[1], lang: _detectLangFromText(html), server: 'Servidor' });
+    }
+  }
+  return out;
+}
+function _detectLangFromText(text) {
+  var t = String(text || '').toLowerCase();
+  if (t.indexOf('latino') >= 0 || /\blat\b/.test(t)) return 'Latino';
+  if (t.indexOf('castellano') >= 0 || t.indexOf('español') >= 0 || /\besp\b/.test(t)) return 'Castellano';
+  if (t.indexOf('sub') >= 0 || t.indexOf('vose') >= 0) return 'Subtitulado';
+  if (t.indexOf('english') >= 0 || t.indexOf('inglés') >= 0) return 'Inglés';
+  return 'Latino';
 }
 
 async function providerCinecalidad(tmdbId, isMovie, season, episode) {
@@ -631,47 +828,57 @@ async function providerCinecalidad(tmdbId, isMovie, season, episode) {
   return embeds;
 }
 
-function _extractDataUrlLi(html) {
-  var out = [], seen = {};
-  var re = /<li[^>]*data-url=["']([^"']+)["'][^>]*data-name=["']([^"']*)["'][^>]*>/gi, m;
-  while ((m = re.exec(html)) !== null) {
-    if (seen[m[1]]) continue;
-    seen[m[1]] = true;
-    out.push({ url: m[1], lang: _detectLangFromText(m[2] + ' ' + html), server: m[2] || 'Servidor' });
-  }
-  var opt = /var\s+options\s*=\s*(\{[\s\S]*?\});/i.exec(html);
-  if (opt) {
-    try {
-      var s = opt[1].replace(/'/g, '"').replace(/,\s*}/g, '}');
-      var data = JSON.parse(s);
-      Object.keys(data).forEach(function (key) {
-        var list = data[key];
-        if (!Array.isArray(list)) return;
-        list.forEach(function (item) {
-          if (item && item.url && !seen[item.url]) {
-            seen[item.url] = true;
-            out.push({ url: item.url, lang: normalizeLanguage(key), server: item.name || key });
-          }
+async function providerHackStore(tmdbId, isMovie, season, episode) {
+  var tmdb = await getTmdbInfo(tmdbId, isMovie);
+  var BASE = 'https://hackstore.mx';
+  var titles = [tmdb.latino, tmdb.castellano, tmdb.ingles].filter(Boolean);
+  var postType = isMovie ? 'movies' : 'tvshows';
+  var embeds = [];
+  for (var t = 0; t < titles.length && !embeds.length; t++) {
+    var slug = slugify(titles[t]);
+    if (!slug) continue;
+    var slugs = [slug];
+    if (tmdb.year) slugs.push(slug + '-' + tmdb.year);
+    for (var s = 0; s < slugs.length && !embeds.length; s++) {
+      var api = BASE + '/wp-api/v1/single/' + postType + '?slug=' + encodeURIComponent(slugs[s]) + '&postType=' + postType;
+      var data = await httpGetJson(api, { Referer: BASE + '/' });
+      if (!data) continue;
+      var contentId = data._id || data.id || (data.data && (data.data._id || data.data.id));
+      if (!contentId && data.posts && data.posts[0]) contentId = data.posts[0]._id || data.posts[0].id;
+      if (!contentId) continue;
+      var targetId = contentId;
+      if (!isMovie) {
+        var epApi = BASE + '/wp-api/v1/single/episodes/list?_id=' + contentId + '&season=' + season + '&page=1&postsPerPage=200';
+        var epData = await httpGetJson(epApi, { Referer: BASE + '/' });
+        var list = (epData && (epData.posts || epData.data || epData)) || [];
+        if (!Array.isArray(list)) list = [];
+        var found = null;
+        list.forEach(function (ep) {
+          var num = ep.episode || ep.episode_number || ep.number || ep.ep;
+          if (String(num) === String(episode)) found = ep._id || ep.id;
+        });
+        if (!found) continue;
+        targetId = found;
+      }
+      var players = await httpGetJson(BASE + '/wp-api/v1/player?postId=' + targetId, { Referer: BASE + '/' });
+      var arr = Array.isArray(players) ? players : (players && (players.players || players.data)) || [];
+      if (!Array.isArray(arr)) continue;
+      arr.forEach(function (p) {
+        var u = (p.url || p.link || p.embed || p.src || '').toString();
+        if (!u) return;
+        embeds.push({
+          url: u,
+          lang: langLabel(p.lang || p.language || p.idioma || 'Latino'),
+          server: (p.name || p.server || p.title || detectServer(u)).toString()
         });
       });
-    } catch (e) {}
-  }
-  var ifr = /<iframe[^>]+src=["']([^"']+)["']/gi;
-  while ((m = ifr.exec(html)) !== null) {
-    if (!seen[m[1]]) {
-      seen[m[1]] = true;
-      out.push({ url: m[1], lang: _detectLangFromText(html), server: 'Servidor' });
     }
   }
-  return out;
-}
-function _detectLangFromText(text) {
-  var t = String(text || '').toLowerCase();
-  if (t.indexOf('latino') >= 0 || /\blat\b/.test(t)) return 'Latino';
-  if (t.indexOf('castellano') >= 0 || t.indexOf('español') >= 0 || /\besp\b/.test(t)) return 'Castellano';
-  if (t.indexOf('sub') >= 0 || t.indexOf('vose') >= 0) return 'Subtitulado';
-  if (t.indexOf('english') >= 0 || t.indexOf('inglés') >= 0) return 'Inglés';
-  return 'Latino';
+  /* fallback slug HTML */
+  if (!embeds.length) {
+    return providerSlugSite(BASE, isMovie ? '/pelicula/' : '/serie/', tmdbId, isMovie, season, episode);
+  }
+  return embeds;
 }
 
 async function providerSlugSite(base, pathPrefix, tmdbId, isMovie, season, episode) {
@@ -693,9 +900,9 @@ async function providerSlugSite(base, pathPrefix, tmdbId, isMovie, season, episo
   });
   candidates = candidates.filter(function (v, i, a) { return a.indexOf(v) === i; });
   var embeds = [];
-  for (var i = 0; i < candidates.length && embeds.length < 3; i++) {
+  for (var i = 0; i < candidates.length && embeds.length < 4; i++) {
     var html = await httpGet(candidates[i]);
-    if (!html || html.length < 500) continue;
+    if (!html || html.length < 400) continue;
     var found = _extractDataUrlLi(html);
     if (!found.length && html.indexOf('__NEXT_DATA__') >= 0) {
       var pp = extractNextData(html);
@@ -711,9 +918,6 @@ async function providerSlugSite(base, pathPrefix, tmdbId, isMovie, season, episo
 
 async function providerPelisPlus(tmdbId, isMovie, season, episode) {
   return providerSlugSite('https://www.pelisplushd.la', isMovie ? '/pelicula/' : '/serie/', tmdbId, isMovie, season, episode);
-}
-async function providerHackStore(tmdbId, isMovie, season, episode) {
-  return providerSlugSite('https://hackstore.mx', isMovie ? '/pelicula/' : '/serie/', tmdbId, isMovie, season, episode);
 }
 async function providerPoseidon(tmdbId, isMovie, season, episode) {
   return providerSlugSite('https://www.poseidonhd2.co', isMovie ? '/movies/' : '/series/', tmdbId, isMovie, season, episode);
@@ -731,7 +935,7 @@ async function providerTioPlus(tmdbId, isMovie, season, episode) {
   return providerSlugSite('https://tioplus.app', isMovie ? '/movie/' : '/tv/', tmdbId, isMovie, season, episode);
 }
 
-// ─── Registry ────────────────────────────────────────────
+/* ── Registry ─────────────────────────────────────────── */
 var PROVIDERS = {
   embed69: { name: 'Embed69', fn: providerEmbed69 },
   cuevana: { name: 'Cuevana', fn: providerCuevana },
@@ -757,7 +961,7 @@ function listSources() {
   });
 }
 function setSourceEnabled(id, on) {
-  if (ENABLED.hasOwnProperty(id)) ENABLED[id] = !!on;
+  if (Object.prototype.hasOwnProperty.call(ENABLED, id)) ENABLED[id] = !!on;
 }
 
 async function resolveEmbedList(embeds, sourceId, sourceName) {
@@ -766,8 +970,12 @@ async function resolveEmbedList(embeds, sourceId, sourceName) {
   var slice = embeds.slice(0, MAX);
   var jobs = slice.map(function (e) {
     return extract(e.url).then(function (r) {
-      return tagStream(r, e.lang, e.server, sourceId, sourceName);
-    }).catch(function () { return null; });
+      if (r && r.url) return tagStream(r, e.lang, e.server, sourceId, sourceName);
+      /* Si no se resolvió HLS, devolver embed para que la app intente extract */
+      return tagEmbed(e.url, e.lang, e.server, sourceId, sourceName, e.quality);
+    }).catch(function () {
+      return tagEmbed(e.url, e.lang, e.server, sourceId, sourceName, e.quality);
+    });
   });
   var results = await Promise.all(jobs);
   return results.filter(Boolean);
@@ -789,10 +997,7 @@ async function getStreamsFrom(sourceId, tmdbId, type, season, episode) {
   }
 }
 
-/**
- * API principal que llama la app:
- *   getStreams(tmdbId, type, season, episode)
- */
+/** API principal de la app */
 async function getStreams(tmdbId, type, season, episode) {
   var ids = listSources().filter(function (s) { return s.enabled; }).map(function (s) { return s.id; });
   var jobs = ids.map(function (id) {
@@ -811,18 +1016,13 @@ async function getStreams(tmdbId, type, season, episode) {
   return merged;
 }
 
-async function getChannels() { return []; }
-async function getChannelStream() { return null; }
-
-// Export compatible con JsAddonRuntime de LOL App
+/* Exports */
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     getStreams: getStreams,
     getStreamsFrom: getStreamsFrom,
     listSources: listSources,
     setSourceEnabled: setSourceEnabled,
-    getChannels: getChannels,
-    getChannelStream: getChannelStream,
     extract: extract
   };
 }
