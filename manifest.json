@@ -1,0 +1,29 @@
+{
+  "id": "community.loltv.fuentes",
+  "version": "1.0.0",
+  "name": "LOLTV Fuentes (Embed69 + Cuevana)",
+  "description": "Complemento multi-fuente: Embed69 y Cuevana con idiomas legibles (Latino/Castellano/Subtitulado). Un solo instalable, varias fuentes.",
+  "logo": "https://via.placeholder.com/128/0B0F14/64B5F6?text=LF",
+  "resources": ["stream"],
+  "types": ["movie", "series", "tv"],
+  "idPrefixes": ["tmdb", "tt"],
+  "catalogs": [],
+  "behaviorHints": {
+    "adult": false,
+    "p2p": false
+  },
+  "sources": [
+    {
+      "id": "embed69",
+      "name": "Embed69",
+      "types": ["movie", "series"],
+      "entry": "getStreamsEmbed69"
+    },
+    {
+      "id": "cuevana",
+      "name": "Cuevana",
+      "types": ["movie", "series"],
+      "entry": "getStreamsCuevana"
+    }
+  ]
+}
